@@ -1222,16 +1222,21 @@ async def download_replay(match_id: str, puuid: str) -> Optional[str]:
         replay_path = os.path.join(replay_dir, f"{match_id}.rofl")
         
         # Download the replay file
+        logging.debug("Downloading replay from: %s", url)
         data = await _request('GET', url, headers=headers, return_type='bytes')
         if data is None:
-            logging.warning("Could not download replay for match %s", match_id)
+            logging.warning("Could not download replay for match %s (API returned None or error)", match_id)
+            return None
+        
+        if len(data) == 0:
+            logging.warning("Downloaded replay file is empty for match %s", match_id)
             return None
         
         # Write to file
         with open(replay_path, 'wb') as f:
             f.write(data)
         
-        logging.info("✓ Downloaded replay: %s", replay_path)
+        logging.info("✓ Downloaded replay: %s (%d bytes)", replay_path, len(data))
         return replay_path
         
     except Exception as e:
@@ -1250,6 +1255,11 @@ def convert_rofl_to_mp4(rofl_path: str) -> Optional[str]:
     """
     import subprocess
     
+    # Check if rofl file exists
+    if not os.path.exists(rofl_path):
+        logging.error("ROFL file does not exist: %s", rofl_path)
+        return None
+    
     # Try multiple ffmpeg paths (system PATH, then local installation)
     ffmpeg_paths = [
         'ffmpeg',  # System PATH
@@ -1262,6 +1272,7 @@ def convert_rofl_to_mp4(rofl_path: str) -> Optional[str]:
         try:
             subprocess.run([path, '-version'], capture_output=True, check=True)
             ffmpeg_cmd = path
+            logging.info("Found ffmpeg at: %s", path)
             break
         except (FileNotFoundError, subprocess.CalledProcessError):
             continue
@@ -1289,14 +1300,19 @@ def convert_rofl_to_mp4(rofl_path: str) -> Optional[str]:
             mp4_path
         ]
         
-        logging.info("Converting replay to MP4: %s", rofl_path)
+        logging.info("Converting replay to MP4: %s -> %s", rofl_path, mp4_path)
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)  # 1 hour timeout
         
         if result.returncode != 0:
-            logging.error("ffmpeg conversion failed: %s", result.stderr)
+            logging.error("ffmpeg conversion failed (code %d): %s", result.returncode, result.stderr[:500])
             return None
         
-        logging.info("✓ Converted to MP4: %s", mp4_path)
+        if not os.path.exists(mp4_path):
+            logging.error("MP4 file was not created at: %s", mp4_path)
+            return None
+        
+        file_size_mb = os.path.getsize(mp4_path) / (1024 * 1024)
+        logging.info("✓ Converted to MP4: %s (%.1f MB)", mp4_path, file_size_mb)
         return mp4_path
         
     except subprocess.TimeoutExpired:
