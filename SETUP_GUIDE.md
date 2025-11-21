@@ -67,8 +67,11 @@ pip install -r requirements.txt
 
 1. Go to https://developer.riotgames.com/
 2. Sign in with your Riot account
-3. Under **"Development API Key"**, copy the key
-4. ⚠️ **Note**: This expires every 24 hours. For permanent access, apply for Production Key.
+3. Choose your API key type:
+   - **Personal API Key** (Recommended): Doesn't expire, perfect for personal use
+   - **Development API Key**: Expires every 24 hours, need to regenerate daily
+   - **Production API Key**: Apply for approval, for public bots
+4. Copy the key
 
 ---
 

@@ -4,31 +4,28 @@ A Discord bot that automatically tracks League of Legends matches for multiple s
 
 ## ✨ Features
 
-- **🔄 Automatic Match Tracking**: Monitors multiple summoners and posts results to Discord
-- **⚡ Slash Commands**: Modern Discord UI with 11 interactive commands
-- **🎨 Rich Embeds**: Beautiful embeds with champion icons, ANSI colors, and stats
-- **👥 Multi-Summoner Support**: Track unlimited players simultaneously
-- **🔔 Ping Notifications**: Get pinged when specific players finish games
-- **📊 Comprehensive Stats**: Ranked, KDA, history, mastery, and live game info
+- 🔍 **Automatic Match Tracking**: Monitors multiple summoners and posts results to Discord
+- ⚡ **Slash Commands**: Modern Discord UI with 10+ interactive commands
+- 🎨 **Rich Embeds**: Beautiful embeds with champion icons, colors, and stats
+- 👥 **Multi-Summoner Support**: Track unlimited players simultaneously
+- 🔔 **Ping Notifications**: Get pinged when specific players finish games
+- 📊 **Comprehensive Stats**: Ranked, KDA, history, mastery info
 
 ## 📋 Commands
 
-### Player Statistics
-- `/rank [riot_id]` - Show Solo/Duo and Flex ranked stats
-- `/history [riot_id]` - Last 10 games with KDA, CS, game mode, and champion icons
-- `/kda <champion> [riot_id] [count]` - Champion-specific performance analysis
-- `/mastery [riot_id] [champion]` - Champion mastery levels and points
-- `/livegame [riot_id]` - Current game details (if playing)
+### 📈 Player Statistics
+- `/rank [summoner]` - Show Solo/Duo and Flex ranked stats
+- `/history [summoner]` - Last 10 games with KDA, CS, game mode, and champion icons
+- `/kda <champion> [summoner] [count]` - Champion-specific performance analysis
+- `/mastery [summoner] [champion]` - Champion mastery levels and points
 
-### Summoner Management
-- `/addsummoner <game_name> <tag_line> [ping]` - Add summoner to tracking (optional Discord ping)
+### 👤 Summoner Management
+- `/addsummoner <riot_id> <ping_choice> [user_ping]` - Add summoner to tracking
 - `/listsummoners` - View all tracked summoners
 - `/addmulti <opgg_url>` - Bulk add from OP.GG multi-search URL
-- `/delsummoner <riot_id>` - Remove summoner (Admin only)
-- `/cleanup` - Remove invalid/inactive summoners (Admin only)
-
-### Help
-- `/help [command]` - Command documentation and examples
+- `/delsummoner [summoner]` - Remove summoner (Admin only)
+- `/cleanup` - Clear matches file (Admin only)
+- `/help` - Command documentation
 
 ## 🚀 Quick Start for Your Server
 
@@ -36,27 +33,23 @@ A Discord bot that automatically tracks League of Legends matches for multiple s
 
 **1. Invite the Bot**
 
-Use this URL (replace `YOUR_CLIENT_ID` with the bot's Application ID from Discord Developer Portal):
+Use this URL (replace `YOUR_CLIENT_ID` with the bot's Application ID):
 ```
 https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=274877959168
 ```
 
-**2. Configure the Channel**
-
-Run `/addsummoner` in the channel where you want match notifications.
-
-**3. Add Summoners**
+**2. Configure & Add Summoners**
 
 ```
-/addsummoner Faker T1
-/addsummoner Doublelift NA1 <@YOUR_USER_ID>
+/addsummoner Faker#T1 yes
+/addsummoner Doublelift#NA1 yes @your_username
 ```
 
-The bot will automatically track their games and post results every 5 minutes!
+The bot automatically tracks games every 5 minutes!
 
 ---
 
-## 🛠️ Setup (For Hosting Your Own Instance)
+## ⚙️ Setup (For Hosting Your Own Instance)
 
 ### Prerequisites
 
@@ -69,8 +62,8 @@ The bot will automatically track their games and post results every 5 minutes!
 **1. Clone & Install**
 
 ```bash
-git clone https://github.com/yourusername/DiscordPythonBot.git
-cd DiscordPythonBot
+git clone https://github.com/Spritemelody/Melodys-LoL-Tracker.git
+cd Melodys-LoL-Tracker
 pip install -r requirements.txt
 ```
 
@@ -82,66 +75,46 @@ Create a `.env` file in the root directory:
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
 RIOT_API_KEY=your_riot_api_key_here
 CHANNEL_ID=your_discord_channel_id_here
+VOD_CHANNEL_ID=your_vod_channel_id_here
 ```
 
-**3. Get Your Credentials**
-
-<details>
-<summary><b>🤖 Discord Bot Token</b></summary>
+**3. Get Your Discord Bot Token**
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Click "New Application" and give it a name
-3. Go to the "Bot" tab → Click "Add Bot"
-4. Under "Token", click "Reset Token" and copy it
-5. **Enable these Privileged Intents:**
-   - ✅ Message Content Intent
-   - ✅ Server Members Intent (optional)
+3. Go to the "Bot" tab and click "Add Bot"
+4. Under "Token", click "Copy" to copy your token
+5. Enable these Privileged Intents:
+   - Message Content Intent
+   - Server Members Intent
 6. Save your token to `.env`
 
-**Bot Invite URL:**
-```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=274877959168
-```
-Replace `YOUR_CLIENT_ID` with the Application ID from the "General Information" tab.
+**4. Get Your Riot API Key**
 
-</details>
+1. Go to [Riot Developer Portal](https://developer.riotgames.com/)
+2. Sign in with your Riot account
+3. Generate a personal API key (valid for 24 hours)
+4. Save it to `.env` as `RIOT_API_KEY`
 
-<details>
-<summary><b>🎮 Riot API Key</b></summary>
+**5. Get Your Discord Channel IDs**
 
-1. Visit [Riot Developer Portal](https://developer.riotgames.com/)
-2. Sign in with your Riot Games account
-3. Copy your **Development API Key** (expires every 24 hours)
-   - For production: Apply for a **Production API Key** (permanent)
-4. Save to `.env`
+1. Enable Developer Mode in Discord (User Settings > Advanced > Developer Mode)
+2. Right-click any channel and select "Copy Channel ID"
+3. Save to `.env` as `CHANNEL_ID` (for match notifications)
+4. Optionally set `VOD_CHANNEL_ID` (for replay videos)
 
-⚠️ **Note**: Development keys expire daily. For 24/7 operation, apply for production access.
-
-</details>
-
-<details>
-<summary><b>💬 Discord Channel ID</b></summary>
-
-1. Enable Developer Mode in Discord:
-   - Settings → Advanced → Developer Mode (toggle ON)
-2. Right-click the channel where you want match notifications
-3. Click "Copy Channel ID"
-4. Save to `.env`
-
-</details>
-
-
-**4. Run the Bot**
+**6. Run the Bot**
 
 ```bash
 python Working.py
 ```
 
-The bot will:
-- ✅ Connect to Discord and sync slash commands
-- ✅ Load champion data from Riot's Data Dragon
-- ✅ Start checking for new matches every 5 minutes
-- ✅ Post match results automatically
+You should see:
+```
+League of Legends Match Tracker Bot
+Logged in as: Melodys LOL Tracker
+Target Channel ID: YOUR_CHANNEL_ID
+```
 
 ---
 
@@ -151,223 +124,109 @@ The bot will:
 DiscordPythonBot/
 ├── Working.py              # Main bot code (2,288 lines)
 ├── requirements.txt        # Python dependencies
-├── .env                   # Your credentials (DO NOT COMMIT)
-├── .env.example           # Template for others
-├── .gitignore            # Protects .env from being uploaded
-├── summoners.json        # Tracked players (auto-created)
-├── last_matches.json     # Match state (auto-created)
-└── README.md             # Documentation
+├── .env                    # Your credentials (protected by .gitignore - safe!)
+├── .env.example            # Template for others
+├── .gitignore              # Keeps .env safe & local
+├── summoners.json          # Tracked players (auto-created)
+├── last_matches.json       # Match state (auto-created)
+└── README.md               # Documentation
 ```
 
-## ⚙️ Configuration
+---
+
+## ⚙️ How It Works
+
+### Match Detection Loop
+- Runs every 5 minutes
+- Checks all tracked summoners for new matches
+- Compares current match ID with last stored ID
+- Posts new matches automatically
+
+### Match Embeds Include
+- Champion name and icon
+- KDA (Kills/Deaths/Assists)
+- CS (Creep Score) and CS/min
+- Game duration
+- Game mode
+- LP gained/lost (for ranked)
+- Match timestamp
+
+### Ranked Stats
+Shows your current rank for:
+- Solo/Duo Queue
+- Flexible Queue
+- Wins, losses, and LP
+
+### Mastery Info
+Displays champion masteries with:
+- Mastery level (1-7)
+- Mastery points
+- Star ratings
+
+---
+
+## 🔧 Configuration
 
 ### Environment Variables
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `DISCORD_BOT_TOKEN` | ✅ Yes | Discord bot token from Developer Portal | `MTQzNz...` |
-| `RIOT_API_KEY` | ✅ Yes | Riot API key (dev or production) | `RGAPI-...` |
-| `CHANNEL_ID` | ✅ Yes | Channel ID for match notifications | `1437933626...` |
+| `DISCORD_BOT_TOKEN` | Yes | Discord bot authentication token | `MTA4NzI4MTY5Nz...` |
+| `RIOT_API_KEY` | Yes | Riot API key for League data | `RGAPI-...` |
+| `CHANNEL_ID` | Yes | Channel ID for match notifications | `1437933626850283651` |
+| `VOD_CHANNEL_ID` | No | Channel ID for replay videos | `1441107047704821772` |
 
-### Region Settings (Optional)
+### Default Settings
 
-Default: **North America**. To change regions, edit `Working.py` (lines 61-62):
-
-```python
-REGION = "na1"           # Platform: na1, euw1, kr, br1, etc.
-ROUTING_REGION = "americas"  # Routing: americas, europe, asia, sea
-```
-
-**Region Reference:**
-- **Americas**: na1, br1, la1, la2
-- **Europe**: euw1, eune1, tr1, ru
-- **Asia**: kr, jp1
-- **SEA**: oc1, ph2, sg2, th2, tw2, vn2
-
-## 📊 Data Files (Auto-Generated)
-
-### `summoners.json`
-Stores tracked summoners with metadata:
-```json
-{
-  "GameName#TAG": {
-    "puuid": "...",
-    "summoner_id": "...",
-    "added_at": "2025-11-20T10:00:00",
-    "ping_id": "<@291714837669478410>"  // Optional
-  }
-}
-```
-
-### `last_matches.json`
-Prevents duplicate match posts:
-```json
-{
-  "puuid_here": "NA1_1234567890"
-}
-```
-
-## 🔧 Troubleshooting
-
-<details>
-<summary><b>❌ Slash commands don't appear</b></summary>
-
-**Solutions:**
-1. Wait 1-2 minutes after bot starts (global sync takes time)
-2. Kick and re-invite the bot with the correct invite URL
-3. Check bot has "Use Application Commands" permission
-4. Restart Discord client
-
-**Verify in console:**
-```
-✓ Globally synced 11 slash command(s): rank, history, kda, ...
-```
-
-</details>
-
-<details>
-<summary><b>⚠️ "Rate limited" errors</b></summary>
-
-**Development API Key Limits:**
-- 20 requests/second
-- 100 requests/2 minutes
-
-**Solutions:**
-- Bot has built-in rate limiting (10 concurrent requests max)
-- Apply for Production Key for 24/7 operation
-- Reduce number of tracked summoners
-
-</details>
-
-<details>
-<summary><b>🔴 Match tracking not working</b></summary>
-
-**Checklist:**
-1. ✅ Bot is running (`python Working.py`)
-2. ✅ Summoners added correctly (`/listsummoners`)
-3. ✅ Bot has "Send Messages" permission in notification channel
-4. ✅ Check console for errors
-5. ✅ Player has played a game in last 5 minutes
-
-**Test immediately:**
-```python
-# In Working.py, change check interval from 5 minutes to 1 minute:
-@tasks.loop(minutes=1)  # Changed from minutes=5
-```
-
-</details>
-
-<details>
-<summary><b>🎮 Riot API key expired</b></summary>
-
-**Development keys expire every 24 hours.**
-
-**Quick fix:**
-1. Go to [Riot Developer Portal](https://developer.riotgames.com/)
-2. Copy new Development API Key
-3. Update `.env` file
-4. Restart bot
-
-**Permanent solution:** Apply for Production API Key (doesn't expire)
-
-</details>
-
-## 🎨 Customization
-
-### Ping Notifications
-
-Add summoners with custom pings:
-```
-/addsummoner Faker T1 <@123456789>
-```
-
-When Faker finishes a game, `@user` gets pinged!
-
-### Match Check Frequency
-
-Edit `Working.py` line ~1385:
-```python
-@tasks.loop(minutes=5)  # Change to desired interval
-async def check_for_new_matches():
-```
-
-⚠️ Lower intervals = more API requests = higher rate limit risk
-
-### Admin-Only Commands
-
-By default, `/cleanup` and `/delsummoner` require Discord Administrator permission.
-
-To change, remove `@app_commands.default_permissions(administrator=True)` decorators.
-
-## 🚀 Deployment (24/7 Hosting)
-
-### Option 1: Cloud VPS (Recommended)
-- **DigitalOcean**: $6/month droplet
-- **AWS EC2**: Free tier eligible
-- **Google Cloud**: $10/month credit
-
-**Setup:**
-```bash
-# Clone repo
-git clone https://github.com/yourusername/DiscordPythonBot.git
-cd DiscordPythonBot
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure .env
-nano .env
-
-# Run with screen/tmux
-screen -S lolbot
-python Working.py
-# Press Ctrl+A then D to detach
-```
-
-### Option 2: Replit / Railway / Render
-- Free tier available on most platforms
-- Use "Always On" feature (may require paid plan)
-- Add `.env` variables in platform's secrets manager
-
-### Option 3: Local PC (24/7)
-- Simple but requires always-on computer
-- Use Task Scheduler (Windows) or cron (Linux) for auto-restart
-
-## 📝 License
-
-MIT License - feel free to modify and distribute!
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Test thoroughly
-4. Submit a pull request
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/DiscordPythonBot/issues)
-- **Discord**: Your Discord server invite
-- **Riot API Docs**: https://developer.riotgames.com/apis
+- **Default Summoner**: Blinds2Blinkers#Pyke
+- **Check Interval**: 5 minutes
+- **Region**: NA1 (North America)
+- **Queue Types**: Ranked Solo, Ranked Flex, Draft, Blind, ARAM
 
 ---
 
-**Made with ❤️ for the League of Legends community**
+## 🔍 Troubleshooting
 
-## License
+### Bot doesn't start
+- Check that all environment variables are set correctly in `.env`
+- Verify your Discord bot token is valid
+- Make sure your Riot API key hasn't expired (personal keys expire every 24 hours)
 
-MIT License - feel free to modify and use for your own projects.
+### Bot doesn't post matches
+- Verify the channel ID is correct
+- Make sure the bot has "Send Messages" and "Embed Links" permissions
+- Check that summoner names are spelled correctly (case-sensitive)
 
-## Credits
+### Bot says summoner not found
+- Verify the Riot ID format: `GameName#TagLine`
+- Check the summoner exists on OP.GG
+- Ensure you're using the correct region (NA1 for North America)
 
-- Built with [discord.py](https://github.com/Rapptz/discord.py)
-- Uses [Riot Games API](https://developer.riotgames.com/)
-- Champion data from [Data Dragon](https://developer.riotgames.com/docs/lol#data-dragon)
+---
 
-## Support
+## 💻 Development
 
-For issues or questions:
-1. Check the troubleshooting section above
-2. Review Discord and Riot API documentation
-3. Check console logs for detailed error messages
+### Key Functions
+
+- `get_puuid_from_riot_id_v2()` - Fetch summoner PUUID from Riot ID
+- `get_match_history()` - Retrieve recent matches
+- `get_match_details()` - Get full match data
+- `post_match_to_discord()` - Format and send embeds
+- `check_for_new_matches()` - Main polling loop
+
+### Adding New Commands
+
+1. Use `@app_commands.command()` decorator
+2. Implement command handler function
+3. Add to bot's command list
+4. Add help text in `/help` command
+
+---
+
+## 📜 License
+
+This project is for personal use. Feel free to fork and modify!
+
+## 💬 Support
+
+For issues or questions, open a GitHub issue or check the existing documentation.

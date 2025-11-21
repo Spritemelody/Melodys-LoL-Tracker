@@ -26,7 +26,7 @@ Thumbs.db
 desktop.ini
 
 # Bot Data (keep local only)
-summoners.json
+summoners.json  # Re-added to gitignore after initial deploy
 last_matches.json
 *.log
 
