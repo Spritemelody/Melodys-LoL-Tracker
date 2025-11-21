@@ -56,6 +56,19 @@ else:
     CHANNEL_ID = 12345
     CHANNEL_ID_SOURCE = 'default'
 
+_vod_channel_env = os.getenv("VOD_CHANNEL_ID")
+if _vod_channel_env:
+    try:
+        VOD_CHANNEL_ID = int(_vod_channel_env)
+        VOD_CHANNEL_ID_SOURCE = 'env'
+    except ValueError:
+        logging.warning("Invalid VOD_CHANNEL_ID value '%s'; using None", _vod_channel_env)
+        VOD_CHANNEL_ID = None
+        VOD_CHANNEL_ID_SOURCE = 'fallback'
+else:
+    VOD_CHANNEL_ID = None
+    VOD_CHANNEL_ID_SOURCE = 'default'
+
 
 def _sanitize_env(value: Optional[str]) -> Optional[str]:
     """Trim and remove CR/LF from environment-provided secrets."""
@@ -1157,6 +1170,143 @@ async def get_match_details(match_id: str) -> Optional[dict]:
         return None
 
 
+async def get_replays(match_id: str) -> Optional[dict]:
+    """Get replay information for a match.
+    
+    Args:
+        match_id: The match ID (e.g., 'na1_12345')
+    
+    Returns:
+        Dict with 'url' and 'key' if available, None otherwise
+    """
+    url = f"https://{ROUTING_REGION}.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline"
+    headers = {"X-Riot-Token": RIOT_API_KEY}
+    
+    try:
+        data = await _request('GET', url, headers=headers, return_type='json')
+        if data is None:
+            return None
+        
+        # The match timeline includes frameInterval and frames
+        # For replay purposes, we return the match ID which can be used to construct replay links
+        if isinstance(data, dict):
+            return {
+                "match_id": match_id,
+                "has_timeline": True
+            }
+        return None
+    except Exception as e:
+        logging.exception("Error in get_replays: %s", e)
+        return None
+
+
+async def download_replay(match_id: str, puuid: str) -> Optional[str]:
+    """Download .rofl replay file from Riot's replay API.
+    
+    Args:
+        match_id: The match ID
+        puuid: The player's PUUID
+    
+    Returns:
+        Path to downloaded .rofl file, or None if failed
+    """
+    # Riot Replays API endpoint
+    url = f"https://{REGION}.api.riotgames.com/lol/replays/v1/replay/{match_id}"
+    headers = {"X-Riot-Token": RIOT_API_KEY}
+    
+    try:
+        # Create replays directory if it doesn't exist
+        replay_dir = "replays"
+        os.makedirs(replay_dir, exist_ok=True)
+        
+        replay_path = os.path.join(replay_dir, f"{match_id}.rofl")
+        
+        # Download the replay file
+        data = await _request('GET', url, headers=headers, return_type='bytes')
+        if data is None:
+            logging.warning("Could not download replay for match %s", match_id)
+            return None
+        
+        # Write to file
+        with open(replay_path, 'wb') as f:
+            f.write(data)
+        
+        logging.info("✓ Downloaded replay: %s", replay_path)
+        return replay_path
+        
+    except Exception as e:
+        logging.exception("Error downloading replay for %s: %s", match_id, e)
+        return None
+
+
+def convert_rofl_to_mp4(rofl_path: str) -> Optional[str]:
+    """Convert .rofl replay file to MP4 using ffmpeg.
+    
+    Args:
+        rofl_path: Path to the .rofl file
+    
+    Returns:
+        Path to the converted MP4 file, or None if failed
+    """
+    import subprocess
+    
+    # Try multiple ffmpeg paths (system PATH, then local installation)
+    ffmpeg_paths = [
+        'ffmpeg',  # System PATH
+        r'C:\ffmpeg\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe',  # Local installation
+        r'C:\ffmpeg\bin\ffmpeg.exe',  # Alternative local path
+    ]
+    
+    ffmpeg_cmd = None
+    for path in ffmpeg_paths:
+        try:
+            subprocess.run([path, '-version'], capture_output=True, check=True)
+            ffmpeg_cmd = path
+            break
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+    
+    if ffmpeg_cmd is None:
+        logging.error("✗ ffmpeg not found. Download from https://ffmpeg.org/download.html and extract to C:\\ffmpeg, or add to PATH")
+        return None
+
+    
+    try:
+        # Generate output MP4 path
+        mp4_path = rofl_path.replace('.rofl', '.mp4')
+        
+        # Use ffmpeg to convert
+        # Note: .rofl is a proprietary format, so we use ffmpeg to extract video data
+        cmd = [
+            ffmpeg_cmd,
+            '-i', rofl_path,
+            '-c:v', 'libx264',  # H.264 video codec
+            '-preset', 'fast',   # Compression speed (fast = less CPU)
+            '-crf', '23',        # Quality (lower = better, 0-51)
+            '-c:a', 'aac',       # Audio codec
+            '-b:a', '128k',      # Audio bitrate
+            '-y',                # Overwrite output file
+            mp4_path
+        ]
+        
+        logging.info("Converting replay to MP4: %s", rofl_path)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)  # 1 hour timeout
+        
+        if result.returncode != 0:
+            logging.error("ffmpeg conversion failed: %s", result.stderr)
+            return None
+        
+        logging.info("✓ Converted to MP4: %s", mp4_path)
+        return mp4_path
+        
+    except subprocess.TimeoutExpired:
+        logging.error("✗ ffmpeg conversion timeout for %s", rofl_path)
+        return None
+    except Exception as e:
+        logging.exception("Error converting replay to MP4: %s", e)
+        return None
+
+
 async def get_champion_mastery(puuid: str, top_count: int = 5) -> Optional[list]:
     """Get top champion masteries for a summoner."""
     url = f"https://{REGION}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/{puuid}/top"
@@ -1381,6 +1531,124 @@ async def post_match_to_discord(match_data: dict, target_puuid: str, summoner_ri
     except Exception as e:
         logging.exception("✗ Error posting to Discord: %s", e)
 
+
+async def send_replay_to_vod_channel(match_id: str, summoner_riot_id: str, champion: str, game_mode: str, puuid: str):
+    """Send replay VOD to the dedicated VOD channel as MP4.
+    
+    Only posts VODs for Blinds2Blinkers#Pyke.
+    
+    Args:
+        match_id: The match ID from match metadata
+        summoner_riot_id: The summoner's Riot ID (GameName#TagLine)
+        champion: Champion name
+        game_mode: Game mode string
+        puuid: Player UUID for replay download
+    """
+    # Only post VODs for this specific summoner
+    VOD_SUMMONER = "Blinds2Blinkers#Pyke"
+    if summoner_riot_id != VOD_SUMMONER:
+        logging.debug("Skipping VOD post for %s (only posting for %s)", summoner_riot_id, VOD_SUMMONER)
+        return
+    
+    try:
+        if not VOD_CHANNEL_ID:
+            logging.warning("VOD_CHANNEL_ID not configured, skipping replay post")
+            return
+        
+        channel = bot.get_channel(VOD_CHANNEL_ID)
+        if not channel or not isinstance(channel, discord.TextChannel):
+            logging.error("✗ Could not find replays channel with ID %s", VOD_CHANNEL_ID)
+            return
+        
+        game_name, tag_line = summoner_riot_id.split('#')
+        
+        # Step 1: Download the replay
+        logging.info("Downloading replay for match %s...", match_id)
+        rofl_path = await download_replay(match_id, puuid)
+        
+        if rofl_path is None:
+            # Fallback: Send link-only embed if download fails
+            logging.warning("Could not download replay, sending link instead for %s", match_id)
+            embed = discord.Embed(
+                title=f"🎬 Replay - {champion}",
+                description=f"**Summoner:** {summoner_riot_id}\n**Mode:** {game_mode}\n**Match ID:** `{match_id}`",
+                color=discord.Color.blue()
+            )
+            
+            replay_opgg_url = f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
+            embed.add_field(
+                name="View Replay",
+                value=f"[View on op.gg]({replay_opgg_url})\n[Match ID: {match_id}]",
+                inline=False
+            )
+            embed.set_footer(text=f"Match ID: {match_id}")
+            await channel.send(embed=embed)
+            return
+        
+        # Step 2: Convert to MP4
+        logging.info("Converting replay to MP4 for match %s...", match_id)
+        mp4_path = convert_rofl_to_mp4(rofl_path)
+        
+        if mp4_path is None:
+            logging.error("Could not convert replay to MP4, sending link instead")
+            embed = discord.Embed(
+                title=f"🎬 Replay - {champion}",
+                description=f"**Summoner:** {summoner_riot_id}\n**Mode:** {game_mode}\n**Match ID:** `{match_id}`",
+                color=discord.Color.blue()
+            )
+            
+            replay_opgg_url = f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
+            embed.add_field(
+                name="View Replay",
+                value=f"[View on op.gg]({replay_opgg_url})\n[Match ID: {match_id}]",
+                inline=False
+            )
+            embed.set_footer(text=f"Match ID: {match_id}")
+            await channel.send(embed=embed)
+            return
+        
+        # Step 3: Upload to Discord
+        logging.info("Uploading MP4 to Discord for match %s...", match_id)
+        
+        embed = discord.Embed(
+            title=f"🎬 Replay - {champion}",
+            description=f"**Summoner:** {summoner_riot_id}\n**Mode:** {game_mode}\n**Match ID:** `{match_id}`",
+            color=discord.Color.blue()
+        )
+        
+        embed.set_footer(text=f"Match ID: {match_id}")
+        
+        try:
+            with open(mp4_path, 'rb') as video_file:
+                file = discord.File(video_file, filename=f"{match_id}_{champion}.mp4")
+                await channel.send(embed=embed, file=file)
+                logging.info("✓ Posted replay MP4 to VOD channel for %s: %s - %s", summoner_riot_id, champion, game_mode)
+        except discord.errors.HTTPException as e:
+            if "Payload too large" in str(e):
+                logging.warning("MP4 file too large for Discord (>25MB), sending link instead")
+                replay_opgg_url = f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
+                embed.add_field(
+                    name="View Replay",
+                    value=f"[View on op.gg]({replay_opgg_url})\n[Match ID: {match_id}]",
+                    inline=False
+                )
+                await channel.send(embed=embed)
+            else:
+                raise
+        finally:
+            # Cleanup: Remove temporary files
+            try:
+                if os.path.exists(rofl_path):
+                    os.remove(rofl_path)
+                if os.path.exists(mp4_path):
+                    os.remove(mp4_path)
+                logging.debug("Cleaned up replay files for match %s", match_id)
+            except Exception as e:
+                logging.warning("Could not cleanup replay files: %s", e)
+        
+    except Exception as e:
+        logging.exception("✗ Error sending replay to VOD channel: %s", e)
+
 @tasks.loop(minutes=5)
 async def check_for_new_matches():
     # Load all tracked summoners
@@ -1435,7 +1703,32 @@ async def check_for_new_matches():
                 ping_id = data.get('ping_id')
                 await post_match_to_discord(match_details, puuid, summoner_name, ping_id) 
                 
-                # 3. Update persistence map for this puuid
+                # 3. Fetch and send replay to VOD channel
+                queue_id = match_details['info']['queueId']
+                queue_names = {
+                    420: 'Ranked Solo/Duo',
+                    440: 'Ranked Flex',
+                    400: 'Draft Pick',
+                    430: 'Blind Pick',
+                    450: 'ARAM',
+                    1700: 'Arena',
+                    1300: 'Nexus Blitz',
+                    490: 'Quickplay',
+                    700: 'Clash'
+                }
+                game_mode = queue_names.get(queue_id, f'Queue {queue_id}')
+                
+                # Find the champion name from participant data
+                champion_name = "Unknown"
+                for participant in match_details['info']['participants']:
+                    if participant['puuid'] == puuid:
+                        champion_name = participant['championName']
+                        break
+                
+                match_id = match_details['metadata']['matchId']
+                await send_replay_to_vod_channel(match_id, summoner_name, champion_name, game_mode, puuid)
+                
+                # 4. Update persistence map for this puuid
                 match_persistence[puuid] = latest_match_id
             else:
                 logging.warning("    - ✗ Could not retrieve match details for %s", latest_match_id)
