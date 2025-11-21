@@ -229,4 +229,7 @@ This project is for personal use. Feel free to fork and modify!
 
 ## 💬 Support
 
-For issues or questions, open a GitHub issue or check the existing documentation.
+For issues or questions:
+- Open a GitHub issue
+- Check the existing documentation
+- Contact me on Discord: **@Spritemelody**
