@@ -1469,6 +1469,11 @@ async def post_match_to_discord(match_data: dict, target_puuid: str, summoner_ri
         # Deconstruct the Riot ID for the embed URL
         game_name, tag_line = summoner_riot_id.split('#')
         
+        # URL encode summoner name for op.gg link (handle spaces and special chars)
+        from urllib.parse import quote
+        encoded_name = quote(f"{game_name}-{tag_line}", safe='')
+        opgg_url = f"https://www.op.gg/summoners/na/{encoded_name}"
+        
         win = participant_data['win']
         champion = participant_data['championName']
         kills = participant_data['kills']
@@ -1484,6 +1489,7 @@ async def post_match_to_discord(match_data: dict, target_puuid: str, summoner_ri
             400: 'Draft Pick',
             430: 'Blind Pick',
             450: 'ARAM',
+            480: 'Swiftplay',
             1700: 'Arena',
             1300: 'Nexus Blitz',
             490: 'Quickplay',
@@ -1508,7 +1514,7 @@ async def post_match_to_discord(match_data: dict, target_puuid: str, summoner_ri
             title=title,
             color=discord.Color.green() if win else discord.Color.red(),
             timestamp=datetime.fromtimestamp(match_data['info']['gameEndTimestamp'] / 1000),
-            url=f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
+            url=opgg_url
         )
         
         embed.set_thumbnail(url=get_champion_icon_url(champion))
