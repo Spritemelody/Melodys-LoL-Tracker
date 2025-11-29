@@ -186,7 +186,8 @@ Default is North America. To change:
 - Try kicking and re-inviting the bot
 
 ### "401 Unauthorized" errors
-- Your Riot API key expired (dev keys expire every 24 hours)
+- Your Riot API key is invalid or incorrect
+- Make sure you're using a **Personal API Key** (which doesn't expire)
 - Get a new key from https://developer.riotgames.com/
 - Update `.env` and restart bot
 

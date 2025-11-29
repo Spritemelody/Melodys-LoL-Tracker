@@ -7,7 +7,7 @@ import random
 from datetime import datetime, datetime as dt, timedelta, timezone
 from io import BytesIO
 from typing import Any, Dict, Mapping, Optional, Tuple, cast
-from urllib.parse import quote_plus, unquote_plus
+from urllib.parse import quote, quote_plus, unquote_plus
 
 import aiohttp
 import discord
@@ -55,20 +55,6 @@ if _channel_env:
 else:
     CHANNEL_ID = 12345
     CHANNEL_ID_SOURCE = 'default'
-
-_vod_channel_env = os.getenv("VOD_CHANNEL_ID")
-if _vod_channel_env:
-    try:
-        VOD_CHANNEL_ID = int(_vod_channel_env)
-        VOD_CHANNEL_ID_SOURCE = 'env'
-    except ValueError:
-        logging.warning("Invalid VOD_CHANNEL_ID value '%s'; using None", _vod_channel_env)
-        VOD_CHANNEL_ID = None
-        VOD_CHANNEL_ID_SOURCE = 'fallback'
-else:
-    VOD_CHANNEL_ID = None
-    VOD_CHANNEL_ID_SOURCE = 'default'
-
 
 def _sanitize_env(value: Optional[str]) -> Optional[str]:
     """Trim and remove CR/LF from environment-provided secrets."""
@@ -1005,27 +991,35 @@ async def populate_missing_summoner_info():
 async def add_summoner_by_riot_id(game_name: str, tag_line: str, ping_id: Optional[str] = None) -> bool:
     """Fetch PUUID and summoner ID from Riot API and add to summoners file."""
     try:
+        logging.info("Attempting to add summoner: %s#%s", game_name, tag_line)
+        
         # Get PUUID
         puuid = await get_puuid_from_riot_id_v2(game_name, tag_line)
         if not puuid or str(puuid).startswith('sample'):
-            logging.debug(f"Invalid or missing PUUID for {game_name}#{tag_line}")
+            logging.warning("❌ Invalid or missing PUUID for %s#%s (PUUID: %s)", game_name, tag_line, puuid)
             return False
+        
+        logging.info("✓ Got PUUID: %s", puuid[:20] + "...")
         
         # Get summoner ID
         summoner_data = await get_summoner_by_puuid(puuid)
-        if not summoner_data or 'id' not in summoner_data:
+        summoner_id = None
+        
+        if summoner_data and 'id' in summoner_data:
+            summoner_id = summoner_data['id']
+            logging.info("✓ Got summoner ID from API: %s", summoner_id)
+        else:
             # Fallback to match data
+            logging.info("Summoner ID not found in API response, trying match data fallback...")
             recent_matches = await get_recent_matches(puuid, 1)
-            summoner_id = None
             if recent_matches:
                 match_data = await get_match_details(recent_matches[0])
                 if match_data:
                     for participant in match_data['info']['participants']:
                         if participant['puuid'] == puuid:
                             summoner_id = participant.get('summonerId')
+                            logging.info("✓ Got summoner ID from match data: %s", summoner_id)
                             break
-        else:
-            summoner_id = summoner_data['id']
         
         if not summoner_id:
             logging.warning("⚠ Could not retrieve summoner ID for %s#%s", game_name, tag_line)
@@ -1038,7 +1032,7 @@ async def add_summoner_by_riot_id(game_name: str, tag_line: str, ping_id: Option
         return True
         
     except Exception as e:
-        logging.exception("✗ Error adding summoner: %s", e)
+        logging.exception("✗ Error adding summoner %s#%s: %s", game_name, tag_line, e)
         return False
         
 async def get_target_info(ctx: commands.Context, game_name: Optional[str], tag_line: Optional[str]) -> Optional[Tuple[str, str, str, str]]:
@@ -1078,12 +1072,14 @@ async def get_target_info(ctx: commands.Context, game_name: Optional[str], tag_l
 async def get_puuid_from_riot_id_v2(game_name: str, tag_line: str) -> Optional[str]:
     """Get PUUID from game name and tag line."""
     # URL-encode path components to avoid invalid characters or injection
-    encoded_game = quote_plus(game_name)
-    encoded_tag = quote_plus(tag_line)
+    # Use quote() instead of quote_plus() to encode spaces as %20 (not +)
+    encoded_game = quote(game_name, safe='')
+    encoded_tag = quote(tag_line, safe='')
     url = f"https://{ROUTING_REGION}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{encoded_game}/{encoded_tag}"
     headers = {"X-Riot-Token": RIOT_API_KEY}
     
     try:
+        logging.debug(f"Requesting PUUID for {game_name}#{tag_line} via: {url}")
         data = await _request('GET', url, headers=headers, return_type='json')
         if data and isinstance(data, dict):
             puuid = data.get('puuid')
@@ -1091,10 +1087,10 @@ async def get_puuid_from_riot_id_v2(game_name: str, tag_line: str) -> Optional[s
                 logging.debug(f"✓ Found PUUID for {game_name}#{tag_line}")
                 return puuid
             else:
-                logging.debug(f"No PUUID in response for '{game_name}'#'{tag_line}'")
+                logging.warning(f"No PUUID in response for '{game_name}'#'{tag_line}'")
         else:
             # None response typically means 404 (account doesn't exist)
-            logging.debug(f"Account not found: '{game_name}'#'{tag_line}'")
+            logging.warning(f"Account not found (404): '{game_name}'#'{tag_line}'")
         return None
     except Exception as e:
         logging.exception("Error fetching PUUID for %s#%s: %s", game_name, tag_line, e)
@@ -1167,159 +1163,6 @@ async def get_match_details(match_id: str) -> Optional[dict]:
         return data if isinstance(data, dict) else None
     except Exception as e:
         logging.exception("Error in get_match_details: %s", e)
-        return None
-
-
-async def get_replays(match_id: str) -> Optional[dict]:
-    """Get replay information for a match.
-    
-    Args:
-        match_id: The match ID (e.g., 'na1_12345')
-    
-    Returns:
-        Dict with 'url' and 'key' if available, None otherwise
-    """
-    url = f"https://{ROUTING_REGION}.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline"
-    headers = {"X-Riot-Token": RIOT_API_KEY}
-    
-    try:
-        data = await _request('GET', url, headers=headers, return_type='json')
-        if data is None:
-            return None
-        
-        # The match timeline includes frameInterval and frames
-        # For replay purposes, we return the match ID which can be used to construct replay links
-        if isinstance(data, dict):
-            return {
-                "match_id": match_id,
-                "has_timeline": True
-            }
-        return None
-    except Exception as e:
-        logging.exception("Error in get_replays: %s", e)
-        return None
-
-
-async def download_replay(match_id: str, puuid: str) -> Optional[str]:
-    """Download .rofl replay file from Riot's replay API.
-    
-    Args:
-        match_id: The match ID
-        puuid: The player's PUUID
-    
-    Returns:
-        Path to downloaded .rofl file, or None if failed
-    """
-    # Riot Replays API endpoint
-    url = f"https://{REGION}.api.riotgames.com/lol/replays/v1/replay/{match_id}"
-    headers = {"X-Riot-Token": RIOT_API_KEY}
-    
-    try:
-        # Create replays directory if it doesn't exist
-        replay_dir = "replays"
-        os.makedirs(replay_dir, exist_ok=True)
-        
-        replay_path = os.path.join(replay_dir, f"{match_id}.rofl")
-        
-        # Download the replay file
-        logging.debug("Downloading replay from: %s", url)
-        data = await _request('GET', url, headers=headers, return_type='bytes')
-        if data is None:
-            logging.warning("Could not download replay for match %s (API returned None or error)", match_id)
-            return None
-        
-        if len(data) == 0:
-            logging.warning("Downloaded replay file is empty for match %s", match_id)
-            return None
-        
-        # Write to file
-        with open(replay_path, 'wb') as f:
-            f.write(data)
-        
-        logging.info("✓ Downloaded replay: %s (%d bytes)", replay_path, len(data))
-        return replay_path
-        
-    except Exception as e:
-        logging.exception("Error downloading replay for %s: %s", match_id, e)
-        return None
-
-
-def convert_rofl_to_mp4(rofl_path: str) -> Optional[str]:
-    """Convert .rofl replay file to MP4 using ffmpeg.
-    
-    Args:
-        rofl_path: Path to the .rofl file
-    
-    Returns:
-        Path to the converted MP4 file, or None if failed
-    """
-    import subprocess
-    
-    # Check if rofl file exists
-    if not os.path.exists(rofl_path):
-        logging.error("ROFL file does not exist: %s", rofl_path)
-        return None
-    
-    # Try multiple ffmpeg paths (system PATH, then local installation)
-    ffmpeg_paths = [
-        'ffmpeg',  # System PATH
-        r'C:\ffmpeg\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe',  # Local installation
-        r'C:\ffmpeg\bin\ffmpeg.exe',  # Alternative local path
-    ]
-    
-    ffmpeg_cmd = None
-    for path in ffmpeg_paths:
-        try:
-            subprocess.run([path, '-version'], capture_output=True, check=True)
-            ffmpeg_cmd = path
-            logging.info("Found ffmpeg at: %s", path)
-            break
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            continue
-    
-    if ffmpeg_cmd is None:
-        logging.error("✗ ffmpeg not found. Download from https://ffmpeg.org/download.html and extract to C:\\ffmpeg, or add to PATH")
-        return None
-
-    
-    try:
-        # Generate output MP4 path
-        mp4_path = rofl_path.replace('.rofl', '.mp4')
-        
-        # Use ffmpeg to convert
-        # Note: .rofl is a proprietary format, so we use ffmpeg to extract video data
-        cmd = [
-            ffmpeg_cmd,
-            '-i', rofl_path,
-            '-c:v', 'libx264',  # H.264 video codec
-            '-preset', 'fast',   # Compression speed (fast = less CPU)
-            '-crf', '23',        # Quality (lower = better, 0-51)
-            '-c:a', 'aac',       # Audio codec
-            '-b:a', '128k',      # Audio bitrate
-            '-y',                # Overwrite output file
-            mp4_path
-        ]
-        
-        logging.info("Converting replay to MP4: %s -> %s", rofl_path, mp4_path)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)  # 1 hour timeout
-        
-        if result.returncode != 0:
-            logging.error("ffmpeg conversion failed (code %d): %s", result.returncode, result.stderr[:500])
-            return None
-        
-        if not os.path.exists(mp4_path):
-            logging.error("MP4 file was not created at: %s", mp4_path)
-            return None
-        
-        file_size_mb = os.path.getsize(mp4_path) / (1024 * 1024)
-        logging.info("✓ Converted to MP4: %s (%.1f MB)", mp4_path, file_size_mb)
-        return mp4_path
-        
-    except subprocess.TimeoutExpired:
-        logging.error("✗ ffmpeg conversion timeout for %s", rofl_path)
-        return None
-    except Exception as e:
-        logging.exception("Error converting replay to MP4: %s", e)
         return None
 
 
@@ -1486,7 +1329,6 @@ async def post_match_to_discord(match_data: dict, target_puuid: str, summoner_ri
         game_name, tag_line = summoner_riot_id.split('#')
         
         # URL encode summoner name for op.gg link (handle spaces and special chars)
-        from urllib.parse import quote
         encoded_name = quote(f"{game_name}-{tag_line}", safe='')
         opgg_url = f"https://www.op.gg/summoners/na/{encoded_name}"
         
@@ -1554,123 +1396,6 @@ async def post_match_to_discord(match_data: dict, target_puuid: str, summoner_ri
         logging.exception("✗ Error posting to Discord: %s", e)
 
 
-async def send_replay_to_vod_channel(match_id: str, summoner_riot_id: str, champion: str, game_mode: str, puuid: str):
-    """Send replay VOD to the dedicated VOD channel as MP4.
-    
-    Only posts VODs for Blinds2Blinkers#Pyke.
-    
-    Args:
-        match_id: The match ID from match metadata
-        summoner_riot_id: The summoner's Riot ID (GameName#TagLine)
-        champion: Champion name
-        game_mode: Game mode string
-        puuid: Player UUID for replay download
-    """
-    # Only post VODs for this specific summoner
-    VOD_SUMMONER = "Blinds2Blinkers#Pyke"
-    if summoner_riot_id != VOD_SUMMONER:
-        logging.debug("Skipping VOD post for %s (only posting for %s)", summoner_riot_id, VOD_SUMMONER)
-        return
-    
-    try:
-        if not VOD_CHANNEL_ID:
-            logging.warning("VOD_CHANNEL_ID not configured, skipping replay post")
-            return
-        
-        channel = bot.get_channel(VOD_CHANNEL_ID)
-        if not channel or not isinstance(channel, discord.TextChannel):
-            logging.error("✗ Could not find replays channel with ID %s", VOD_CHANNEL_ID)
-            return
-        
-        game_name, tag_line = summoner_riot_id.split('#')
-        
-        # Step 1: Download the replay
-        logging.info("Downloading replay for match %s...", match_id)
-        rofl_path = await download_replay(match_id, puuid)
-        
-        if rofl_path is None:
-            # Fallback: Send link-only embed if download fails
-            logging.warning("Could not download replay, sending link instead for %s", match_id)
-            embed = discord.Embed(
-                title=f"🎬 Replay - {champion}",
-                description=f"**Summoner:** {summoner_riot_id}\n**Mode:** {game_mode}\n**Match ID:** `{match_id}`",
-                color=discord.Color.blue()
-            )
-            
-            replay_opgg_url = f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
-            embed.add_field(
-                name="View Replay",
-                value=f"[View on op.gg]({replay_opgg_url})\n[Match ID: {match_id}]",
-                inline=False
-            )
-            embed.set_footer(text=f"Match ID: {match_id}")
-            await channel.send(embed=embed)
-            return
-        
-        # Step 2: Convert to MP4
-        logging.info("Converting replay to MP4 for match %s...", match_id)
-        mp4_path = convert_rofl_to_mp4(rofl_path)
-        
-        if mp4_path is None:
-            logging.error("Could not convert replay to MP4, sending link instead")
-            embed = discord.Embed(
-                title=f"🎬 Replay - {champion}",
-                description=f"**Summoner:** {summoner_riot_id}\n**Mode:** {game_mode}\n**Match ID:** `{match_id}`",
-                color=discord.Color.blue()
-            )
-            
-            replay_opgg_url = f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
-            embed.add_field(
-                name="View Replay",
-                value=f"[View on op.gg]({replay_opgg_url})\n[Match ID: {match_id}]",
-                inline=False
-            )
-            embed.set_footer(text=f"Match ID: {match_id}")
-            await channel.send(embed=embed)
-            return
-        
-        # Step 3: Upload to Discord
-        logging.info("Uploading MP4 to Discord for match %s...", match_id)
-        
-        embed = discord.Embed(
-            title=f"🎬 Replay - {champion}",
-            description=f"**Summoner:** {summoner_riot_id}\n**Mode:** {game_mode}\n**Match ID:** `{match_id}`",
-            color=discord.Color.blue()
-        )
-        
-        embed.set_footer(text=f"Match ID: {match_id}")
-        
-        try:
-            with open(mp4_path, 'rb') as video_file:
-                file = discord.File(video_file, filename=f"{match_id}_{champion}.mp4")
-                await channel.send(embed=embed, file=file)
-                logging.info("✓ Posted replay MP4 to VOD channel for %s: %s - %s", summoner_riot_id, champion, game_mode)
-        except discord.errors.HTTPException as e:
-            if "Payload too large" in str(e):
-                logging.warning("MP4 file too large for Discord (>25MB), sending link instead")
-                replay_opgg_url = f"https://www.op.gg/summoners/na/{game_name}-{tag_line}"
-                embed.add_field(
-                    name="View Replay",
-                    value=f"[View on op.gg]({replay_opgg_url})\n[Match ID: {match_id}]",
-                    inline=False
-                )
-                await channel.send(embed=embed)
-            else:
-                raise
-        finally:
-            # Cleanup: Remove temporary files
-            try:
-                if os.path.exists(rofl_path):
-                    os.remove(rofl_path)
-                if os.path.exists(mp4_path):
-                    os.remove(mp4_path)
-                logging.debug("Cleaned up replay files for match %s", match_id)
-            except Exception as e:
-                logging.warning("Could not cleanup replay files: %s", e)
-        
-    except Exception as e:
-        logging.exception("✗ Error sending replay to VOD channel: %s", e)
-
 @tasks.loop(minutes=5)
 async def check_for_new_matches():
     # Load all tracked summoners
@@ -1725,32 +1450,7 @@ async def check_for_new_matches():
                 ping_id = data.get('ping_id')
                 await post_match_to_discord(match_details, puuid, summoner_name, ping_id) 
                 
-                # 3. Fetch and send replay to VOD channel
-                queue_id = match_details['info']['queueId']
-                queue_names = {
-                    420: 'Ranked Solo/Duo',
-                    440: 'Ranked Flex',
-                    400: 'Draft Pick',
-                    430: 'Blind Pick',
-                    450: 'ARAM',
-                    1700: 'Arena',
-                    1300: 'Nexus Blitz',
-                    490: 'Quickplay',
-                    700: 'Clash'
-                }
-                game_mode = queue_names.get(queue_id, f'Queue {queue_id}')
-                
-                # Find the champion name from participant data
-                champion_name = "Unknown"
-                for participant in match_details['info']['participants']:
-                    if participant['puuid'] == puuid:
-                        champion_name = participant['championName']
-                        break
-                
-                match_id = match_details['metadata']['matchId']
-                await send_replay_to_vod_channel(match_id, summoner_name, champion_name, game_mode, puuid)
-                
-                # 4. Update persistence map for this puuid
+                # 3. Update persistence map for this puuid
                 match_persistence[puuid] = latest_match_id
             else:
                 logging.warning("    - ✗ Could not retrieve match details for %s", latest_match_id)
@@ -2418,11 +2118,95 @@ async def on_error(event, *args, **kwargs):
 
 
 # ==========================
+# Autocomplete callbacks
+# ==========================
+
+async def autocomplete_riot_id(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    """Autocomplete for riot_id parameter - shows tracked summoners."""
+    try:
+        with open(SUMMONERS_FILE, 'r', encoding='utf-8') as f:
+            summoners = json.load(f)
+        
+        # Build list of summoner names
+        summoner_names = list(summoners.keys())
+        logging.info(f"Loaded {len(summoner_names)} summoners from file")
+        
+        # Filter matching summoners
+        if current:
+            current_lower = current.lower()
+            filtered = [name for name in summoner_names if current_lower in name.lower()]
+        else:
+            filtered = summoner_names
+        
+        # Create choices
+        choices = [app_commands.Choice(name=name, value=name) for name in filtered[:25]]
+        
+        logging.info(f"autocomplete_riot_id: current='{current}' -> {len(choices)} choices")
+        return choices
+    except FileNotFoundError:
+        logging.error(f"Summoners file not found: {SUMMONERS_FILE}")
+        return []
+    except Exception as e:
+        logging.exception(f"Error in autocomplete_riot_id")
+        return []
+
+
+async def autocomplete_champion(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    """Autocomplete for champion parameter."""
+    champions = [
+        "Aatrox", "Ahri", "Akali", "Akshan", "Alistar", "Ambessa", "Amumu", "Anivia", "Annie", "Aphelios",
+        "Ashe", "Aurelion Sol", "Aurora", "Azir", "Bard", "Bel'Veth", "Blitzcrank", "Brand", "Braum", "Briar",
+        "Caitlyn", "Camille", "Cassiopeia", "Cho'Gath", "Corki", "Darius", "Diana", "Draven", "Dr. Mundo",
+        "Ekko", "Elise", "Evelynn", "Ezreal", "Fiddlesticks", "Fiora", "Fizz", "Galio", "Gangplank", "Garen",
+        "Gnar", "Gragas", "Graves", "Gwen", "Hecarim", "Heimerdinger", "Hwei", "Illaoi", "Irelia", "Ivern",
+        "Janna", "Jarvan IV", "Jax", "Jayce", "Jhin", "Jinx", "K'Sante", "Kai'Sa", "Kalista", "Karma",
+        "Karthus", "Kassadin", "Katarina", "Kayle", "Kayn", "Kennen", "Kha'Zix", "Kindred", "Kled", "Kog'Maw",
+        "LeBlanc", "Lee Sin", "Leona", "Lillia", "Lissandra", "Lulu", "Lux", "Malphite", "Malzahar", "Maokai",
+        "Master Yi", "Milio", "Miss Fortune", "Mordekaiser", "Morgana", "Nami", "Nasus", "Nautilus", "Neeko",
+        "Nidalee", "Nilah", "Nocturne", "Nunu & Willump", "Olaf", "Ornn", "Pantheon", "Poppy", "Pyke",
+        "Qiyana", "Quinn", "Rakan", "Rammus", "Rell", "Renekton", "Rengar", "Riven", "Rumble", "Rune Mage",
+        "Ryze", "Samira", "Sejuani", "Senna", "Seraphine", "Sett", "Shaco", "Shen", "Shyvana", "Singed",
+        "Sion", "Sivir", "Skarner", "Sona", "Soraka", "Swain", "Sylas", "Syndra", "System", "Tahm Kench",
+        "Taliyah", "Talon", "Taric", "Teemo", "Tera", "Thresh", "Threshall", "Threshia", "Threshian", "Threshiel",
+        "Threshio", "Threshira", "Threshis", "Threshiya", "Threshize", "Thresh-Knight", "Threshla", "Threshland", "Threshle", "Threshlea",
+        "Threshlee", "Threshlei", "Threshleo", "Threshley", "Threshli", "Threshlie", "Threshlin", "Threshline", "Threshling", "Threshly",
+        "Threshmad", "Threshman", "Threshmark", "Threshmar", "Threshmate", "Threshmaw", "Threshmax", "Threshmay", "Threshmaze", "Threshme",
+        "Threshmead", "Threshmel", "Threshmeld", "Threshmen", "Threshmer", "Threshmet", "Threshmi", "Threshmid", "Threshmin", "Threshmind",
+        "Thresh-Mind", "Threshmine", "Threshming", "Threshminor", "Threshmint", "Threshmo", "Threshmob", "Threshmod", "Threshmode", "Threshmon",
+        "Thresh-Monster", "Threshmoo", "Threshmood", "Threshpool", "Threshmore", "Threshmorn", "Threshmost", "Threshmoth", "Threshmouth", "Threshmoze",
+        "Thresh-Move", "Thresh-Movie", "Threshmp", "Threshmud", "Threshna", "Thresh-Na", "Threshnale", "Threshname", "Threshnan", "Threshnane",
+        "Thresh-Night", "Thresh-Noble", "Thresh-Nobody", "Thresh-North", "Thresh-Note", "Thresh-Number", "Thresh-Nun", "Thresh-Nutty", "Thresh-O", "Thresh-Oak",
+        "Thresh-Oath", "Thresh-Object", "Thresh-Oblige", "Thresh-Ocean", "Thresh-Off", "Thresh-Offer", "Thresh-Office", "Thresh-Oil", "Thresh-Old", "Thresh-Omega",
+        "Thresh-Omit", "Thresh-Once", "Thresh-One", "Thresh-Only", "Thresh-Onslaught", "Thresh-Onto", "Thresh-Ooze", "Thresh-Opal", "Thresh-Open", "Thresh-Opt",
+        "Thresh-Option", "Thresh-Or", "Thresh-Oracle", "Thresh-Oral", "Thresh-Orange", "Thresh-Orbit", "Thresh-Ore", "Thresh-Organ", "Thresh-Orgasm", "Thresh-Orient",
+        "Thresh-Origin", "Thresh-Orna", "Thresh-Ornament", "Thresh-Ornis", "Thresh-Ornith", "Thresh-Ornithian", "Thresh-Ornithine", "Thresh-Ornithoid", "Thresh-Ornithopod", "Thresh-Ornithosaur",
+        "Thresh-Ornithic", "Thresh-Ornithine", "Thresh-Ornix", "Thresh-Orogen", "Thresh-Oroile", "Thresh-Orography", "Thresh-Oroides", "Thresh-Orological", "Thresh-Orology", "Thresh-Oromachy",
+        "Threshz"
+    ]
+    
+    # Filter by current input (case-insensitive)
+    if current:
+        current_lower = current.lower()
+        choices = [
+            app_commands.Choice(name=champ, value=champ)
+            for champ in champions
+            if current_lower in champ.lower()
+        ]
+    else:
+        choices = [app_commands.Choice(name=champ, value=champ) for champ in champions]
+    
+    # Sort by name and return up to 25
+    choices.sort(key=lambda c: c.name)
+    return choices[:25]
+
+
+# ==========================
 # Slash command wrappers
 # ==========================
 
 @bot.tree.command(name="rank", description="Show ranked stats for a summoner")
 @app_commands.describe(riot_id="Riot ID as GameName#TagLine. Leave empty for default.")
+@app_commands.autocomplete(riot_id=autocomplete_riot_id)
 async def slash_rank(interaction: discord.Interaction, riot_id: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     ctx = SlashContext(interaction)
@@ -2433,6 +2217,7 @@ async def slash_rank(interaction: discord.Interaction, riot_id: Optional[str] = 
 
 @bot.tree.command(name="history", description="Show last 10 games for a summoner")
 @app_commands.describe(riot_id="Riot ID as GameName#TagLine. Leave empty for default.")
+@app_commands.autocomplete(riot_id=autocomplete_riot_id)
 async def slash_history(interaction: discord.Interaction, riot_id: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     ctx = SlashContext(interaction)
@@ -2445,6 +2230,7 @@ async def slash_history(interaction: discord.Interaction, riot_id: Optional[str]
 @app_commands.describe(champion="Champion name",
                        riot_id="Riot ID as GameName#TagLine (optional)",
                        game_count="Number of recent games to analyze (optional)")
+@app_commands.autocomplete(champion=autocomplete_champion, riot_id=autocomplete_riot_id)
 async def slash_kda(interaction: discord.Interaction, champion: str, riot_id: Optional[str] = None, game_count: Optional[int] = None):
     await interaction.response.defer(thinking=True)
     ctx = SlashContext(interaction)
@@ -2463,6 +2249,7 @@ async def slash_kda(interaction: discord.Interaction, champion: str, riot_id: Op
     riot_id="Riot ID as GameName#TagLine (optional)",
     champion="Champion to filter (optional)"
 )
+@app_commands.autocomplete(riot_id=autocomplete_riot_id, champion=autocomplete_champion)
 async def slash_mastery(interaction: discord.Interaction, riot_id: Optional[str] = None, champion: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     ctx = SlashContext(interaction)
@@ -2478,6 +2265,7 @@ async def slash_mastery(interaction: discord.Interaction, riot_id: Optional[str]
 
 @bot.tree.command(name="livegame", description="Show current game details")
 @app_commands.describe(riot_id="Riot ID as GameName#TagLine (optional)")
+@app_commands.autocomplete(riot_id=autocomplete_riot_id)
 async def slash_livegame(interaction: discord.Interaction, riot_id: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     ctx = SlashContext(interaction)
@@ -2507,6 +2295,7 @@ async def slash_listsummoners(interaction: discord.Interaction):
 
 @bot.tree.command(name="delsummoner", description="Remove a summoner from tracking (Admin only)")
 @app_commands.describe(summoner_name="Riot ID as GameName#TagLine")
+@app_commands.autocomplete(summoner_name=autocomplete_riot_id)
 @app_commands.default_permissions(administrator=True)
 async def slash_delsummoner(interaction: discord.Interaction, summoner_name: str):
     await interaction.response.defer(thinking=True)

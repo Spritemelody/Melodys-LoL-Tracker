@@ -75,7 +75,6 @@ Create a `.env` file in the root directory:
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
 RIOT_API_KEY=your_riot_api_key_here
 CHANNEL_ID=your_discord_channel_id_here
-VOD_CHANNEL_ID=your_vod_channel_id_here
 ```
 
 **3. Get Your Discord Bot Token**
@@ -93,7 +92,7 @@ VOD_CHANNEL_ID=your_vod_channel_id_here
 
 1. Go to [Riot Developer Portal](https://developer.riotgames.com/)
 2. Sign in with your Riot account
-3. Generate a personal API key (valid for 24 hours)
+3. Generate a **Personal API Key** (doesn't expire, recommended for personal bots)
 4. Save it to `.env` as `RIOT_API_KEY`
 
 **5. Get Your Discord Channel IDs**
@@ -101,7 +100,6 @@ VOD_CHANNEL_ID=your_vod_channel_id_here
 1. Enable Developer Mode in Discord (User Settings > Advanced > Developer Mode)
 2. Right-click any channel and select "Copy Channel ID"
 3. Save to `.env` as `CHANNEL_ID` (for match notifications)
-4. Optionally set `VOD_CHANNEL_ID` (for replay videos)
 
 **6. Run the Bot**
 
@@ -174,7 +172,6 @@ Displays champion masteries with:
 | `DISCORD_BOT_TOKEN` | Yes | Discord bot authentication token | `MTA4NzI4MTY5Nz...` |
 | `RIOT_API_KEY` | Yes | Riot API key for League data | `RGAPI-...` |
 | `CHANNEL_ID` | Yes | Channel ID for match notifications | `1437933626850283651` |
-| `VOD_CHANNEL_ID` | No | Channel ID for replay videos | `1441107047704821772` |
 
 ### Default Settings
 
@@ -190,7 +187,7 @@ Displays champion masteries with:
 ### Bot doesn't start
 - Check that all environment variables are set correctly in `.env`
 - Verify your Discord bot token is valid
-- Make sure your Riot API key hasn't expired (personal keys expire every 24 hours)
+- Make sure your Riot API key is valid (use a Personal API Key which doesn't expire)
 
 ### Bot doesn't post matches
 - Verify the channel ID is correct
